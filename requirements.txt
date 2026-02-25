@@ -1,0 +1,20 @@
+# Senior Product Manager Agent - Dependencies
+# Python 3.8+ required
+
+# Web scraping
+firecrawl-py>=4.0.0
+
+# LLM integration (Anthropic Claude)
+anthropic>=0.18.0
+
+# Data validation and structured output
+pydantic>=2.0.0
+
+# UI
+streamlit>=1.30.0
+
+# Environment variables (.env)
+python-dotenv>=1.0.0
+
+# Optional
+httpx>=0.25.0
