@@ -257,30 +257,64 @@ def main() -> None:
         with st.spinner("Preparing analysis..."):
             time.sleep(2)
 
-        with st.spinner("Running PM Agent (Claude)..."):
+        # Prepare data for analysis
+        limit_total = 15_000
+        parts = []
+        remaining = limit_total
+        for r in successful:
+            md = (r.markdown or "")[:remaining]
+            parts.append(f"--- {r.url} ---\n{md}")
+            remaining -= len(md)
+            if remaining <= 0:
+                break
+        scraped_data = "\n\n".join(parts)
+        
+        # Debug: Show what we're sending
+        debug_expander = st.expander("🔧 Debug Info", expanded=True)
+        with debug_expander:
+            # Check API key
+            api_key_env = os.getenv("ANTHROPIC_API_KEY", "")
+            api_key_secret = ""
             try:
-                limit_total = 15_000
-                parts = []
-                remaining = limit_total
-                for r in successful:
-                    md = (r.markdown or "")[:remaining]
-                    parts.append(f"--- {r.url} ---\n{md}")
-                    remaining -= len(md)
-                    if remaining <= 0:
-                        break
-                scraped_data = "\n\n".join(parts)
+                if hasattr(st, 'secrets') and 'ANTHROPIC_API_KEY' in st.secrets:
+                    api_key_secret = st.secrets['ANTHROPIC_API_KEY']
+            except:
+                pass
+            
+            st.write(f"**API Key from .env:** {'✅ Found' if api_key_env else '❌ Not found'} ({len(api_key_env)} chars)")
+            st.write(f"**API Key from secrets:** {'✅ Found' if api_key_secret else '❌ Not found'} ({len(api_key_secret)} chars)")
+            st.write(f"**Scraped data length:** {len(scraped_data)} chars")
+            st.write(f"**Cloud mode:** {os.environ.get('STREAMLIT_SERVER_HEADLESS', 'false')}")
+            
+            # Show first 500 chars of scraped data
+            st.write("**Scraped preview:**")
+            st.code(scraped_data[:500] + "..." if len(scraped_data) > 500 else scraped_data)
+        
+        with st.spinner("Running PM Agent (Claude)... זה יכול לקחת עד 2 דקות"):
+            try:
+                start_time = time.time()
                 report = run_analysis(scraped_data)
+                elapsed = time.time() - start_time
+                
+                with debug_expander:
+                    st.write(f"**Analysis time:** {elapsed:.1f} seconds")
+                    st.write(f"**Report length:** {len(report) if report else 0} chars")
+                
                 if not report or not report.strip():
                     st.error("לא התקבלה תשובה מהמודל.")
                     return
-                if report.strip().startswith("שגיאה:"):
+                if report.strip().startswith("שגיאה") or report.strip().startswith("שגיאת"):
                     st.error(report)
+                    with debug_expander:
+                        st.write(f"**Error response:** {report}")
                     return
             except ValueError as e:
                 st.error(str(e))
                 return
             except Exception as e:
                 err_str = str(e).lower()
+                with debug_expander:
+                    st.write(f"**Exception:** {type(e).__name__}: {e}")
                 if "429" in err_str or "rate" in err_str or "overloaded" in err_str:
                     st.error("שגיאה: עומס API. נסה שוב בעוד דקה.")
                     return

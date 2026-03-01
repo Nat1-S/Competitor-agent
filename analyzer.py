@@ -144,30 +144,49 @@ def run_analysis(scraped_data: str) -> str:
     Uses ANTHROPIC_API_KEY from .env or Streamlit secrets.
     Returns Markdown report in Hebrew, or error message string.
     """
+    import sys
+    
+    def _debug(msg):
+        """Print debug message to console and return for potential UI display."""
+        print(f"[Analyzer] {msg}")
+        sys.stdout.flush()
+        return msg
+    
+    _debug("Starting analysis...")
+    
     try:
         import anthropic
+        _debug(f"Anthropic SDK version: {anthropic.__version__}")
     except ImportError:
         return "שגיאה: anthropic לא מותקן. הרץ: pip install anthropic"
 
     key = _get_api_key()
     if not key:
         return "שגיאה: ANTHROPIC_API_KEY לא נמצא. הוסף אותו ל-.env או ל-Streamlit Secrets."
+    
+    _debug(f"API key found: {key[:15]}...{key[-4:]} (length: {len(key)})")
 
     clean_text = _clean_scraped_markdown(str(scraped_data or ""))
     if not clean_text.strip():
         return "שגיאה: לא נמצא תוכן לניתוח לאחר הניקוי."
+    
+    _debug(f"Clean text length: {len(clean_text)} chars")
 
     user_content = f"Product website data to analyze:\n\n---\n\n{clean_text}"
 
     # Configure client based on environment
     timeout_seconds = 300 if IS_CLOUD else 120  # Longer timeout for cloud
     
+    _debug(f"IS_CLOUD: {IS_CLOUD}, timeout: {timeout_seconds}s")
+    
     try:
         import httpx
+        _debug(f"httpx version: {httpx.__version__}")
         # In cloud: use default settings
         # Locally: force HTTP/1.1 to avoid network issues
         if IS_CLOUD:
             http_client = httpx.Client(timeout=timeout_seconds)
+            _debug("Using default httpx client for cloud")
         else:
             http_client = httpx.Client(
                 timeout=timeout_seconds,
@@ -175,11 +194,13 @@ def run_analysis(scraped_data: str) -> str:
                 http2=False,
                 trust_env=False
             )
+            _debug("Using HTTP/1.1 httpx client for local")
         client = anthropic.Anthropic(
             api_key=key,
             http_client=http_client,
         )
     except ImportError:
+        _debug("httpx not available, using default client")
         client = anthropic.Anthropic(
             api_key=key,
             timeout=timeout_seconds,
@@ -189,7 +210,7 @@ def run_analysis(scraped_data: str) -> str:
     if not model:
         model = "claude-sonnet-4-6"
 
-    print(f"[Analyzer] Using model: {model}, timeout: {timeout_seconds}s, cloud: {IS_CLOUD}")
+    _debug(f"Using model: {model}")
 
     def _call():
         response = client.messages.create(
@@ -212,43 +233,53 @@ def run_analysis(scraped_data: str) -> str:
 
     for attempt in range(3):  # 1 initial + 2 retries
         try:
-            print(f"[Analyzer] Attempt {attempt + 1}/3...")
+            _debug(f"Attempt {attempt + 1}/3 - calling Anthropic API...")
+            import time as time_module
+            call_start = time_module.time()
             result = _call()
-            print(f"[Analyzer] Success! Response length: {len(result)}")
+            call_duration = time_module.time() - call_start
+            _debug(f"Success! Duration: {call_duration:.1f}s, Response length: {len(result)}")
             return result
         except anthropic.APITimeoutError as e:
-            print(f"[APITimeoutError] {e}")
+            _debug(f"APITimeoutError: {e}")
             if attempt < 2:
-                print("[Analyzer] Retrying after timeout...")
+                _debug("Retrying after timeout...")
                 time.sleep(3)
                 continue
-            return "שגיאת זמן תגובה. הניתוח לוקח יותר מדי זמן. נסה שוב או נסה עם URL קצר יותר."
+            return f"שגיאת זמן תגובה ({timeout_seconds}s). הניתוח לוקח יותר מדי זמן. נסה עם URL קצר יותר."
         except anthropic.APIConnectionError as e:
-            print(f"[APIConnectionError attempt {attempt + 1}/3] {e}")
+            _debug(f"APIConnectionError attempt {attempt + 1}/3: {e}")
             if attempt < 2:
                 time.sleep(5)
                 continue
-            return conn_err_msg
+            return f"שגיאת חיבור: {str(e)[:200]}"
         except anthropic.AuthenticationError as e:
-            print(f"[AuthenticationError] {e}")
-            return "שגיאת אימות: מפתח ה-API לא תקין. בדוק את ANTHROPIC_API_KEY."
+            _debug(f"AuthenticationError: {e}")
+            return f"שגיאת אימות: מפתח ה-API לא תקין. בדוק את ANTHROPIC_API_KEY. ({str(e)[:100]})"
+        except anthropic.RateLimitError as e:
+            _debug(f"RateLimitError: {e}")
+            if attempt < 2:
+                _debug("Rate limited, waiting 10s...")
+                time.sleep(10)
+                continue
+            return "שגיאה: חריגה ממגבלת הבקשות. נסה שוב בעוד דקה."
         except anthropic.APIError as e:
             err_str = str(e).lower()
-            print(f"[APIError] {e}")
+            _debug(f"APIError: {e}")
             if "429" in err_str or "rate" in err_str or "overloaded" in err_str:
                 if attempt < 2:
                     time.sleep(10)
                     continue
                 return "שגיאה: עומס על ה-API. נסה שוב בעוד דקה."
-            return f"שגיאת API: {e}"
+            return f"שגיאת API: {str(e)[:300]}"
         except Exception as e:
-            print(f"[Error] {type(e).__name__}: {e}")
+            _debug(f"Unexpected error: {type(e).__name__}: {e}")
             err_str = str(e).lower()
             if "connection" in err_str or "connect" in err_str or "timeout" in err_str:
                 if attempt < 2:
                     time.sleep(5)
                     continue
-                return conn_err_msg
-            return f"שגיאה בניתוח: {e}"
+                return f"שגיאת חיבור: {str(e)[:200]}"
+            return f"שגיאה בניתוח: {type(e).__name__}: {str(e)[:200]}"
 
     return conn_err_msg
