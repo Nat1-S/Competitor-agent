@@ -3,7 +3,7 @@ Senior Product Manager Agent - LLM analysis via Anthropic Claude.
 
 Persona: Senior PM (10 years experience). Focus: Product Strategy, Value Proposition, QA friction points.
 Output: Detailed structured Markdown in HEBREW.
-Requires ANTHROPIC_API_KEY in .env.
+Requires ANTHROPIC_API_KEY in .env or Streamlit secrets.
 """
 
 from dotenv import load_dotenv
@@ -17,25 +17,45 @@ import re
 import time
 import socket
 
-# DNS workaround: Some networks block connections when resolving via domain
-# but allow direct IP connections. We cache the IP on first successful resolution.
-_ANTHROPIC_IP_CACHE = None
-_original_getaddrinfo = socket.getaddrinfo
+# Detect if running in cloud environment
+def _is_cloud_environment():
+    """Check if we're running in Streamlit Cloud or similar."""
+    # Streamlit Cloud sets these
+    if os.environ.get('STREAMLIT_SERVER_HEADLESS') == 'true':
+        return True
+    # Check for common cloud indicators
+    if os.environ.get('STREAMLIT_SHARING_MODE'):
+        return True
+    if os.environ.get('IS_CLOUD'):
+        return True
+    return False
 
-def _patched_getaddrinfo(host, port, *args, **kwargs):
-    global _ANTHROPIC_IP_CACHE
-    if host == 'api.anthropic.com':
-        if _ANTHROPIC_IP_CACHE is None:
-            # Resolve once and cache
-            results = _original_getaddrinfo(host, port, socket.AF_INET, *args[1:], **kwargs)
-            if results:
-                _ANTHROPIC_IP_CACHE = results[0][4][0]
-        if _ANTHROPIC_IP_CACHE:
-            # Return cached IP to force connection via IP
-            return [(socket.AF_INET, socket.SOCK_STREAM, 6, '', (_ANTHROPIC_IP_CACHE, port))]
-    return _original_getaddrinfo(host, port, *args, **kwargs)
+IS_CLOUD = _is_cloud_environment()
 
-socket.getaddrinfo = _patched_getaddrinfo
+# DNS workaround: Only for LOCAL environments with network restrictions
+# In cloud, use normal DNS resolution
+if not IS_CLOUD:
+    _ANTHROPIC_IP_CACHE = None
+    _original_getaddrinfo = socket.getaddrinfo
+
+    def _patched_getaddrinfo(host, port, *args, **kwargs):
+        global _ANTHROPIC_IP_CACHE
+        if host == 'api.anthropic.com':
+            if _ANTHROPIC_IP_CACHE is None:
+                try:
+                    results = _original_getaddrinfo(host, port, socket.AF_INET, *args[1:] if len(args) > 1 else (), **kwargs)
+                    if results:
+                        _ANTHROPIC_IP_CACHE = results[0][4][0]
+                except:
+                    pass
+            if _ANTHROPIC_IP_CACHE:
+                return [(socket.AF_INET, socket.SOCK_STREAM, 6, '', (_ANTHROPIC_IP_CACHE, port))]
+        return _original_getaddrinfo(host, port, *args, **kwargs)
+
+    socket.getaddrinfo = _patched_getaddrinfo
+    print("[Analyzer] Local mode: DNS workaround enabled")
+else:
+    print("[Analyzer] Cloud mode: Using standard networking")
 
 MAX_CHARS = 15_000  # Truncate scraped Markdown for depth and efficiency
 
@@ -100,10 +120,28 @@ def _clean_scraped_markdown(text: str) -> str:
     return out[:MAX_CHARS]
 
 
+def _get_api_key() -> str:
+    """Get Anthropic API key from env or Streamlit secrets."""
+    # Try environment variable first
+    key = os.getenv("ANTHROPIC_API_KEY", "").strip()
+    if key:
+        return key
+    
+    # Try Streamlit secrets
+    try:
+        import streamlit as st
+        if hasattr(st, 'secrets') and 'ANTHROPIC_API_KEY' in st.secrets:
+            return st.secrets['ANTHROPIC_API_KEY'].strip()
+    except:
+        pass
+    
+    return ""
+
+
 def run_analysis(scraped_data: str) -> str:
     """
     Run PM analysis via Anthropic Claude.
-    Uses ANTHROPIC_API_KEY from .env only.
+    Uses ANTHROPIC_API_KEY from .env or Streamlit secrets.
     Returns Markdown report in Hebrew, or error message string.
     """
     try:
@@ -111,9 +149,9 @@ def run_analysis(scraped_data: str) -> str:
     except ImportError:
         return "שגיאה: anthropic לא מותקן. הרץ: pip install anthropic"
 
-    key = os.getenv("ANTHROPIC_API_KEY", "").strip()
-    if not key or not str(key).strip():
-        return "שגיאה: ANTHROPIC_API_KEY לא נמצא בקובץ .env"
+    key = _get_api_key()
+    if not key:
+        return "שגיאה: ANTHROPIC_API_KEY לא נמצא. הוסף אותו ל-.env או ל-Streamlit Secrets."
 
     clean_text = _clean_scraped_markdown(str(scraped_data or ""))
     if not clean_text.strip():
@@ -121,30 +159,37 @@ def run_analysis(scraped_data: str) -> str:
 
     user_content = f"Product website data to analyze:\n\n---\n\n{clean_text}"
 
+    # Configure client based on environment
+    timeout_seconds = 300 if IS_CLOUD else 120  # Longer timeout for cloud
+    
     try:
         import httpx
-        # Force HTTP/1.1 - HTTP/2 is blocked by some networks
-        http_client = httpx.Client(
-            timeout=120.0,
-            http1=True,
-            http2=False,
-            trust_env=False
-        )
+        # In cloud: use default settings
+        # Locally: force HTTP/1.1 to avoid network issues
+        if IS_CLOUD:
+            http_client = httpx.Client(timeout=timeout_seconds)
+        else:
+            http_client = httpx.Client(
+                timeout=timeout_seconds,
+                http1=True,
+                http2=False,
+                trust_env=False
+            )
         client = anthropic.Anthropic(
             api_key=key,
-            base_url="https://api.anthropic.com",
             http_client=http_client,
         )
     except ImportError:
         client = anthropic.Anthropic(
             api_key=key,
-            base_url="https://api.anthropic.com",
-            timeout=120.0,
+            timeout=timeout_seconds,
         )
 
     model = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6").strip()
     if not model:
         model = "claude-sonnet-4-6"
+
+    print(f"[Analyzer] Using model: {model}, timeout: {timeout_seconds}s, cloud: {IS_CLOUD}")
 
     def _call():
         response = client.messages.create(
@@ -161,28 +206,43 @@ def run_analysis(scraped_data: str) -> str:
         return "שגיאה: לא התקבלה תשובה מהמודל."
 
     conn_err_msg = (
-        "שגיאת חיבור ל-Anthropic. בדוק: 1) אינטרנט פעיל 2) חומת אש/פרוקסי "
-        "3) Anthropic זמין באזור שלך. נסה שוב מאוחר יותר."
+        "שגיאת חיבור ל-Anthropic. בדוק: 1) מפתח API תקין 2) חיבור אינטרנט "
+        "3) נסה שוב בעוד דקה."
     )
 
     for attempt in range(3):  # 1 initial + 2 retries
         try:
-            return _call()
+            print(f"[Analyzer] Attempt {attempt + 1}/3...")
+            result = _call()
+            print(f"[Analyzer] Success! Response length: {len(result)}")
+            return result
         except anthropic.APITimeoutError as e:
-            print("[APITimeoutError]", type(e).__name__, str(e))
-            return "שגיאת זמן תגובה. החיבור איטי מדי. נסה שוב מאוחר יותר."
-        except (anthropic.APIConnectionError, OSError, ConnectionError) as e:
-            print(f"[ConnectionError attempt {attempt + 1}/3]", type(e).__name__, str(e))
+            print(f"[APITimeoutError] {e}")
+            if attempt < 2:
+                print("[Analyzer] Retrying after timeout...")
+                time.sleep(3)
+                continue
+            return "שגיאת זמן תגובה. הניתוח לוקח יותר מדי זמן. נסה שוב או נסה עם URL קצר יותר."
+        except anthropic.APIConnectionError as e:
+            print(f"[APIConnectionError attempt {attempt + 1}/3] {e}")
             if attempt < 2:
                 time.sleep(5)
                 continue
             return conn_err_msg
+        except anthropic.AuthenticationError as e:
+            print(f"[AuthenticationError] {e}")
+            return "שגיאת אימות: מפתח ה-API לא תקין. בדוק את ANTHROPIC_API_KEY."
         except anthropic.APIError as e:
             err_str = str(e).lower()
+            print(f"[APIError] {e}")
             if "429" in err_str or "rate" in err_str or "overloaded" in err_str:
-                return "שגיאה: מכסה/עומס API. נסה שוב בעוד דקה."
+                if attempt < 2:
+                    time.sleep(10)
+                    continue
+                return "שגיאה: עומס על ה-API. נסה שוב בעוד דקה."
             return f"שגיאת API: {e}"
         except Exception as e:
+            print(f"[Error] {type(e).__name__}: {e}")
             err_str = str(e).lower()
             if "connection" in err_str or "connect" in err_str or "timeout" in err_str:
                 if attempt < 2:
