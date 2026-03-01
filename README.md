@@ -1,8 +1,17 @@
 # Strategic Product Analyst | מנתח מוצרים אסטרטגי
 
-A Senior Product Manager Agent that scrapes product URLs, analyzes them with a strategic PM lens, and produces a detailed mapping and comparison report in Hebrew.
+A Senior Product Manager Agent powered by Claude that scrapes product URLs, performs strategic and UX analysis, and produces detailed reports in Hebrew with Google Docs export.
 
-## Setup
+## Features
+
+- 🔍 **URL Scraping** – Scrapes product pages via Firecrawl API
+- 🤖 **AI Analysis** – Claude-powered strategic PM analysis
+- 📊 **Hebrew Reports** – RTL formatted reports in Hebrew
+- 📄 **Google Docs Export** – One-click export to shareable Google Docs
+- 🔐 **Password Protection** – Simple login authentication
+- 🌐 **Cloud Ready** – Deployable to Streamlit Cloud
+
+## Quick Start
 
 ### 1. Install dependencies
 
@@ -10,10 +19,15 @@ A Senior Product Manager Agent that scrapes product URLs, analyzes them with a s
 pip install -r requirements.txt
 ```
 
-### 2. API Keys (in `.env` via python-dotenv)
+### 2. Configure API Keys
 
-- **Firecrawl**: `FIRECRAWL_API_KEY` (get from [firecrawl.dev](https://firecrawl.dev))
-- **Gemini**: `GOOGLE_API_KEY` or `GEMINI_API_KEY` (get from [aistudio.google.com](https://aistudio.google.com))
+Create a `.env` file:
+
+```env
+FIRECRAWL_API_KEY=fc-your-key-here
+ANTHROPIC_API_KEY=sk-ant-your-key-here
+APP_PASSWORD=YourPassword
+```
 
 ### 3. Run the app
 
@@ -21,46 +35,86 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
+## Google Docs Export (Optional)
+
+To enable the "הפץ ל-Docs" feature:
+
+### Local Development
+
+1. Create OAuth credentials in [Google Cloud Console](https://console.cloud.google.com/)
+2. Enable Google Docs API and Google Drive API
+3. Download credentials as `oauth_credentials.json`
+4. On first export, a browser will open for authentication
+5. Token is saved to `token.json` for future use
+
+### Streamlit Cloud
+
+Add to Streamlit Secrets:
+
+```toml
+GOOGLE_TOKEN_JSON = '{"token":"...","refresh_token":"...","client_id":"...","client_secret":"..."}'
+```
+
 ## Project Structure
 
 ```
 competitor agent/
-├── app.py          # Streamlit UI entry point
-├── analyzer.py     # PM Agent LLM logic (LiteLLM)
-├── schema.py       # Pydantic models for structured output
-├── scraper.py      # Firecrawl integration
-├── requirements.txt
-└── README.md
+├── app.py              # Streamlit UI, login, report display
+├── analyzer.py         # Claude API integration, PM analysis
+├── scraper.py          # Firecrawl web scraping
+├── schema.py           # Pydantic models
+├── google_exporter.py  # Google Docs export
+├── requirements.txt    # Dependencies
+├── product_prd.md      # Product Requirements Document
+└── README.md           # This file
 ```
 
-## Features
+## Report Sections
 
-- **Product URL input** – Main product URL field
-- **Add Competitor** – Dynamic competitor URL fields for comparison
-- **Run Analysis** – Triggers scrape → PM Agent analysis
-- **Strategic Product Report** – Hebrew output with:
-  - Product Essence (what it does, problem solved)
-  - Strategy (target audience, positioning, business model)
-  - Feature Inventory
-  - Strengths & Weaknesses
-  - QA & Optimization (friction points, suggestions)
-  - Side-by-side comparison table (when multiple URLs)
+The strategic report includes:
 
-## Model Configuration
+| Section | Description |
+|---------|-------------|
+| **מהות המוצר** | Product essence, value proposition, problem solved |
+| **אסטרטגיה** | Target audience, positioning, business model |
+| **מפת יכולות** | Feature inventory and capabilities |
+| **חוזקות וחולשות** | Strengths & weaknesses analysis |
+| **נקודות חיכוך QA** | UX friction points, conversion blockers |
+| **הצעות לשיפור** | Actionable improvement suggestions |
+| **טבלת השוואה** | Comparison table (when multiple URLs) |
 
-Default: `gemini/gemini-1.5-pro` via LiteLLM.
+## Deployment to Streamlit Cloud
 
-Override via env: `PM_AGENT_MODEL="gemini/gemini-1.5-pro"`
+1. Push code to GitHub
+2. Go to [share.streamlit.io](https://share.streamlit.io)
+3. Connect your repository
+4. Add secrets in Settings:
 
-## Firecrawl (Complex URLs)
+```toml
+FIRECRAWL_API_KEY = "fc-..."
+ANTHROPIC_API_KEY = "sk-ant-..."
+APP_PASSWORD = "YourPassword"
+GOOGLE_TOKEN_JSON = '{"token":"...", ...}'
+```
 
-Scraping is configured for complex sites (e.g., Amazon):
-- `wait_for`: 2s for JS-heavy pages
-- `timeout`: 45s per page
-- `only_main_content`: true to focus on product content
+5. Deploy!
+
+## Environment Variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `FIRECRAWL_API_KEY` | Yes | Firecrawl API key for scraping |
+| `ANTHROPIC_API_KEY` | Yes | Anthropic API key for Claude |
+| `APP_PASSWORD` | No | Login password (default: `Snati#3155`) |
+| `ANTHROPIC_MODEL` | No | Override model (default: `claude-sonnet-4-6`) |
+| `GOOGLE_TOKEN_JSON` | No | Google OAuth token for Docs export |
 
 ## Error Handling
 
-- Failed scrapes (blocked, rate-limited, invalid URLs) are reported per URL
-- Analysis continues with successfully scraped URLs only
-- LLM errors surface a message in the report
+- Failed scrapes are reported per URL; analysis continues with successful URLs
+- Google Docs export failures show a warning but preserve the report in UI
+- API errors display user-friendly Hebrew messages
+
+## License
+
+Private project.
