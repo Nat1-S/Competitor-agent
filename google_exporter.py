@@ -32,19 +32,39 @@ def _get_credentials_from_streamlit_secrets():
     """Try to load credentials from Streamlit secrets (for cloud deployment)."""
     try:
         import streamlit as st
-        if hasattr(st, 'secrets') and 'GOOGLE_TOKEN' in st.secrets:
+        if not hasattr(st, 'secrets'):
+            return None
+            
+        # Try GOOGLE_TOKEN section (TOML table)
+        if 'GOOGLE_TOKEN' in st.secrets:
             token_data = st.secrets['GOOGLE_TOKEN']
-            # If it's a string, parse it as JSON
-            if isinstance(token_data, str):
+            # Convert to dict, handling TOML AttrDict
+            if hasattr(token_data, 'to_dict'):
+                token_dict = token_data.to_dict()
+            elif isinstance(token_data, str):
                 token_dict = json.loads(token_data)
             else:
-                # It's already a dict-like object from TOML
                 token_dict = dict(token_data)
             
+            # Ensure scopes is a list (TOML might parse it differently)
+            if 'scopes' in token_dict and isinstance(token_dict['scopes'], str):
+                token_dict['scopes'] = json.loads(token_dict['scopes'])
+            
+            print(f"[Google Exporter] Token dict keys: {list(token_dict.keys())}")
             creds = Credentials.from_authorized_user_info(token_dict, SCOPES)
             return creds
+        
+        # Alternative: Try GOOGLE_TOKEN_JSON as a single JSON string
+        if 'GOOGLE_TOKEN_JSON' in st.secrets:
+            token_json = st.secrets['GOOGLE_TOKEN_JSON']
+            token_dict = json.loads(token_json)
+            creds = Credentials.from_authorized_user_info(token_dict, SCOPES)
+            return creds
+            
     except Exception as e:
         print(f"[Google Exporter] Failed to load from Streamlit secrets: {e}")
+        import traceback
+        traceback.print_exc()
     return None
 
 
@@ -97,25 +117,29 @@ def _get_credentials():
     
     # 3. Try OAuth flow (local only, won't work in cloud)
     if not creds:
-        if oauth_path.exists():
-            try:
-                from google_auth_oauthlib.flow import InstalledAppFlow
-                flow = InstalledAppFlow.from_client_secrets_file(str(oauth_path), SCOPES)
-                creds = flow.run_local_server(port=0)
-                print("[Google Exporter] New credentials obtained via OAuth")
-                
-                # Save token for future use
-                if creds:
-                    try:
-                        with open(token_path, "w") as f:
-                            f.write(creds.to_json())
-                    except Exception as e:
-                        print(f"[Google Exporter] Failed to save token: {e}")
-            except Exception as e:
-                print(f"[Google Exporter] OAuth flow failed: {e}")
-                return None
-        else:
-            print(f"[Google Exporter] No credentials available")
+        # Check if we're in cloud environment (no oauth file = likely cloud)
+        is_cloud = not oauth_path.exists()
+        
+        if is_cloud:
+            print("[Google Exporter] Running in cloud without GOOGLE_TOKEN secret configured")
+            return None
+        
+        # Local environment - try OAuth flow
+        try:
+            from google_auth_oauthlib.flow import InstalledAppFlow
+            flow = InstalledAppFlow.from_client_secrets_file(str(oauth_path), SCOPES)
+            creds = flow.run_local_server(port=0)
+            print("[Google Exporter] New credentials obtained via OAuth")
+            
+            # Save token for future use
+            if creds:
+                try:
+                    with open(token_path, "w") as f:
+                        f.write(creds.to_json())
+                except Exception as e:
+                    print(f"[Google Exporter] Failed to save token: {e}")
+        except Exception as e:
+            print(f"[Google Exporter] OAuth flow failed: {e}")
             return None
     
     return creds
@@ -142,6 +166,13 @@ def export_to_google_docs(
     # Get credentials
     credentials = _get_credentials()
     if not credentials:
+        # Check if we're in cloud
+        try:
+            import streamlit as st
+            if hasattr(st, 'secrets'):
+                return None, "לא הוגדר GOOGLE_TOKEN ב-Streamlit Secrets. הוסף את פרטי החיבור בהגדרות האפליקציה."
+        except:
+            pass
         return None, "לא נמצאו credentials. וודא שקובץ oauth_credentials.json קיים ואושר."
     
     try:

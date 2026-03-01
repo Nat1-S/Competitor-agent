@@ -22,3 +22,4 @@ httpx>=0.25.0
 # Google Docs export
 google-api-python-client>=2.100.0
 google-auth>=2.22.0
+google-auth-oauthlib>=1.0.0
