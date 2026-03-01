@@ -16,5 +16,9 @@ streamlit>=1.30.0
 # Environment variables (.env)
 python-dotenv>=1.0.0
 
-# Optional
+# HTTP client
 httpx>=0.25.0
+
+# Google Docs export
+google-api-python-client>=2.100.0
+google-auth>=2.22.0

@@ -15,6 +15,27 @@ load_dotenv(Path(__file__).resolve().parent / ".env")
 import os
 import re
 import time
+import socket
+
+# DNS workaround: Some networks block connections when resolving via domain
+# but allow direct IP connections. We cache the IP on first successful resolution.
+_ANTHROPIC_IP_CACHE = None
+_original_getaddrinfo = socket.getaddrinfo
+
+def _patched_getaddrinfo(host, port, *args, **kwargs):
+    global _ANTHROPIC_IP_CACHE
+    if host == 'api.anthropic.com':
+        if _ANTHROPIC_IP_CACHE is None:
+            # Resolve once and cache
+            results = _original_getaddrinfo(host, port, socket.AF_INET, *args[1:], **kwargs)
+            if results:
+                _ANTHROPIC_IP_CACHE = results[0][4][0]
+        if _ANTHROPIC_IP_CACHE:
+            # Return cached IP to force connection via IP
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, '', (_ANTHROPIC_IP_CACHE, port))]
+    return _original_getaddrinfo(host, port, *args, **kwargs)
+
+socket.getaddrinfo = _patched_getaddrinfo
 
 MAX_CHARS = 15_000  # Truncate scraped Markdown for depth and efficiency
 
@@ -102,7 +123,13 @@ def run_analysis(scraped_data: str) -> str:
 
     try:
         import httpx
-        http_client = httpx.Client(timeout=120.0, proxy=None, trust_env=False)
+        # Force HTTP/1.1 - HTTP/2 is blocked by some networks
+        http_client = httpx.Client(
+            timeout=120.0,
+            http1=True,
+            http2=False,
+            trust_env=False
+        )
         client = anthropic.Anthropic(
             api_key=key,
             base_url="https://api.anthropic.com",

@@ -18,6 +18,8 @@ import os
 import time
 import streamlit as st
 
+from google_exporter import export_to_google_docs, check_credentials_status
+
 # Debug: verify API keys loaded (prints to terminal, not UI)
 print(f"Firecrawl Key Loaded: {bool(os.getenv('FIRECRAWL_API_KEY'))}")
 print(f"Anthropic Key Loaded: {bool(os.getenv('ANTHROPIC_API_KEY'))}")
@@ -139,6 +141,11 @@ st.markdown(
     [data-testid="stExpander"] .streamlit-expanderContent { direction: rtl; text-align: right; }
     /* Input labels RTL */
     [data-testid="stTextInput"] label { direction: rtl; text-align: right; }
+    /* Hide "Press Enter to apply" hint inside inputs */
+    [data-testid="stTextInput"] [data-testid="InputInstructions"] { display: none !important; }
+    [data-testid="stTextInput"] .st-emotion-cache-1gulkj5 { display: none !important; }
+    /* Make input fields full width */
+    [data-testid="stTextInput"] input { width: 100% !important; }
     .report-container { direction: rtl; text-align: right; font-family: 'Segoe UI', Tahoma, sans-serif; }
     .report-section { margin: 1.5em 0; padding: 1em; border-radius: 8px; background: #f8f9fa; }
     .report-section h3 { color: #1e3a5f; border-bottom: 2px solid #1e3a5f; padding-bottom: 0.3em; }
@@ -301,9 +308,28 @@ def display_report(report) -> None:
     # Handle plain string from run_analysis (RTL via global CSS)
     if isinstance(report, str):
         st.markdown(report)
-        if st.button("🗑️ Clear Report"):
+        
+        # Google Docs export button
+        st.markdown("")  # Spacer
+        if st.button("📄 הפץ ל-Docs", key="export_docs_str", use_container_width=False):
+            with st.spinner("מייצא לגוגל דוקס..."):
+                doc_url, error = export_to_google_docs(report)
+                if doc_url:
+                    st.success(f"הדוח נוצר בהצלחה! [פתח את המסמך]({doc_url})")
+                    st.session_state.last_doc_url = doc_url
+                else:
+                    st.error(error or "לא ניתן לייצא. בדוק את ה-credentials.")
+        
+        # Show last created doc link if exists
+        if "last_doc_url" in st.session_state:
+            st.markdown(f"[🔗 קישור לדוח האחרון]({st.session_state.last_doc_url})")
+        
+        # Clear report button
+        if st.button("🗑️ נקה דוח", key="clear_str"):
             if "report" in st.session_state:
                 del st.session_state.report
+            if "last_doc_url" in st.session_state:
+                del st.session_state.last_doc_url
             st.rerun()
         return
 
@@ -374,10 +400,57 @@ def display_report(report) -> None:
 
     st.markdown("</div>", unsafe_allow_html=True)
 
+    # Convert structured report to text for export
+    def structured_to_text(rep) -> str:
+        lines = []
+        if rep.executive_summary:
+            lines.append(f"סיכום מנהלים\n{rep.executive_summary}\n")
+        for pa in rep.product_analyses:
+            lines.append(f"\n{pa.product_name} ({pa.product_url})\n")
+            lines.append(f"תיאור: {pa.essence.description}")
+            lines.append(f"בעיה שנפתרת: {pa.essence.problem_solved}\n")
+            lines.append(f"קהל יעד: {pa.strategy.target_audience}")
+            lines.append(f"מיצוב: {pa.strategy.positioning}")
+            lines.append(f"מודל עסקי: {pa.strategy.business_model}\n")
+            if pa.feature_inventory:
+                lines.append("יכולות:")
+                lines.extend(f"  - {f}" for f in pa.feature_inventory)
+            if pa.strengths_weaknesses.strengths:
+                lines.append("\nחוזקות:")
+                lines.extend(f"  - {s}" for s in pa.strengths_weaknesses.strengths)
+            if pa.strengths_weaknesses.weaknesses:
+                lines.append("\nחולשות:")
+                lines.extend(f"  - {w}" for w in pa.strengths_weaknesses.weaknesses)
+            if pa.qa_optimization.friction_points:
+                lines.append("\nנקודות חיכוך:")
+                lines.extend(f"  - {f}" for f in pa.qa_optimization.friction_points)
+            if pa.qa_optimization.suggestions:
+                lines.append("\nהצעות לשיפור:")
+                lines.extend(f"  - {s}" for s in pa.qa_optimization.suggestions)
+        return "\n".join(lines)
+
+    # Google Docs export button
+    st.markdown("")  # Spacer
+    if st.button("📄 הפץ ל-Docs", key="export_docs_struct", use_container_width=False):
+        with st.spinner("מייצא לגוגל דוקס..."):
+            report_text = structured_to_text(report)
+            doc_url, error = export_to_google_docs(report_text)
+            if doc_url:
+                st.success(f"הדוח נוצר בהצלחה! [פתח את המסמך]({doc_url})")
+                st.session_state.last_doc_url = doc_url
+            else:
+                st.error(error or "לא ניתן לייצא. בדוק את ה-credentials.")
+    
+    # Show last created doc link if exists
+    if "last_doc_url" in st.session_state:
+        st.markdown(f"[🔗 קישור לדוח האחרון]({st.session_state.last_doc_url})")
+
     # Clear report button
-    if st.button("🗑️ Clear Report"):
+    if st.button("🗑️ נקה דוח", key="clear_struct"):
         if "report" in st.session_state:
             del st.session_state.report
+        if "last_doc_url" in st.session_state:
+            del st.session_state.last_doc_url
         st.rerun()
 
 

@@ -3,6 +3,13 @@
 .env.*
 *.env
 
+# Google credentials - never commit
+google_credentials*.json
+oauth_credentials*.json
+credentials.json
+*-credentials.json
+token.json
+
 # Python
 __pycache__/
 *.py[cod]
