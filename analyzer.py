@@ -175,7 +175,7 @@ def run_analysis(scraped_data: str) -> str:
     user_content = f"Product website data to analyze:\n\n---\n\n{clean_text}"
 
     # Configure client based on environment
-    timeout_seconds = 300 if IS_CLOUD else 120  # Longer timeout for cloud
+    timeout_seconds = 240  # 4 minutes for both local and cloud
     
     _debug(f"IS_CLOUD: {IS_CLOUD}, timeout: {timeout_seconds}s")
     

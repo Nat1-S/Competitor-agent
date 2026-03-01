@@ -18,7 +18,17 @@ import os
 import time
 import streamlit as st
 
-from google_exporter import export_to_google_docs, check_credentials_status
+# Google Docs export - wrapped in try/except to prevent crashes
+try:
+    from google_exporter import export_to_google_docs, check_credentials_status
+    GOOGLE_EXPORT_AVAILABLE = True
+except ImportError as e:
+    print(f"[Warning] Google exporter not available: {e}")
+    GOOGLE_EXPORT_AVAILABLE = False
+    def export_to_google_docs(*args, **kwargs):
+        return None, "ייצוא ל-Google Docs לא זמין כרגע."
+    def check_credentials_status():
+        return False, "Google Docs לא מוגדר."
 
 # Debug: verify API keys loaded (prints to terminal, not UI)
 print(f"Firecrawl Key Loaded: {bool(os.getenv('FIRECRAWL_API_KEY'))}")
@@ -311,16 +321,19 @@ def display_report(report) -> None:
     if isinstance(report, str):
         st.markdown(report)
         
-        # Google Docs export button
+        # Google Docs export button - with error handling
         st.markdown("")  # Spacer
         if st.button("📄 הפץ ל-Docs", key="export_docs_str", use_container_width=False):
             with st.spinner("מייצא לגוגל דוקס..."):
-                doc_url, error = export_to_google_docs(report)
-                if doc_url:
-                    st.success(f"הדוח נוצר בהצלחה! [פתח את המסמך]({doc_url})")
-                    st.session_state.last_doc_url = doc_url
-                else:
-                    st.error(error or "לא ניתן לייצא. בדוק את ה-credentials.")
+                try:
+                    doc_url, error = export_to_google_docs(report)
+                    if doc_url:
+                        st.success(f"הדוח נוצר בהצלחה! [פתח את המסמך]({doc_url})")
+                        st.session_state.last_doc_url = doc_url
+                    else:
+                        st.warning(error or "לא ניתן לייצא. הדוח עדיין מוצג למעלה.")
+                except Exception as e:
+                    st.warning(f"שגיאה בייצוא ל-Docs: {str(e)[:100]}. הדוח עדיין מוצג למעלה.")
         
         # Show last created doc link if exists
         if "last_doc_url" in st.session_state:
@@ -431,17 +444,20 @@ def display_report(report) -> None:
                 lines.extend(f"  - {s}" for s in pa.qa_optimization.suggestions)
         return "\n".join(lines)
 
-    # Google Docs export button
+    # Google Docs export button - with error handling
     st.markdown("")  # Spacer
     if st.button("📄 הפץ ל-Docs", key="export_docs_struct", use_container_width=False):
         with st.spinner("מייצא לגוגל דוקס..."):
-            report_text = structured_to_text(report)
-            doc_url, error = export_to_google_docs(report_text)
-            if doc_url:
-                st.success(f"הדוח נוצר בהצלחה! [פתח את המסמך]({doc_url})")
-                st.session_state.last_doc_url = doc_url
-            else:
-                st.error(error or "לא ניתן לייצא. בדוק את ה-credentials.")
+            try:
+                report_text = structured_to_text(report)
+                doc_url, error = export_to_google_docs(report_text)
+                if doc_url:
+                    st.success(f"הדוח נוצר בהצלחה! [פתח את המסמך]({doc_url})")
+                    st.session_state.last_doc_url = doc_url
+                else:
+                    st.warning(error or "לא ניתן לייצא. הדוח עדיין מוצג למעלה.")
+            except Exception as e:
+                st.warning(f"שגיאה בייצוא ל-Docs: {str(e)[:100]}. הדוח עדיין מוצג למעלה.")
     
     # Show last created doc link if exists
     if "last_doc_url" in st.session_state:
