@@ -28,7 +28,7 @@ SCOPES = [
 ]
 
 # Debug flag - set to True to see debug messages in Streamlit
-DEBUG_MODE = True
+DEBUG_MODE = False
 
 
 def _log(message: str):

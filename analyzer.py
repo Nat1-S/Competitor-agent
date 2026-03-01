@@ -215,7 +215,7 @@ def run_analysis(scraped_data: str) -> str:
     def _call():
         response = client.messages.create(
             model=model,
-            max_tokens=4096,
+            max_tokens=8192,
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": user_content}],
         )
